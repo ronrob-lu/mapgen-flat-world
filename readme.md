@@ -55,7 +55,7 @@ Start exploring in seconds with built-in landmark navigation:
 2. **Drop the Mod**:
    - Clone or copy this repository into your Luanti `mods/` folder.
 3. **Enable in World**:
-   - In the Luanti main menu, select your world, click **Configure Mods**, and enable **`island_gen`** (or ensure `load_mod_island_gen = true` in `world.mt`).
+   - In the Luanti main menu, select your world, click **Configure Mods**, and enable **`worldmap_gen`** (or ensure `load_mod_worldmap_gen = true` in `world.mt`).
 4. **Enter the World & Explore**:
    - Type `/worldmap list` to start your globe-trotting journey!
 

@@ -33,7 +33,7 @@ print('✓ world_map.json structure verified: 2048x1024 grid, bounds correctly s
 lua -e "
 minetest = {
     set_mapgen_setting = function() end,
-    get_current_modname = function() return 'island_gen' end,
+    get_current_modname = function() return 'worldmap_gen' end,
     get_modpath = function() return '.' end,
     log = function() end,
     parse_json = function(s)
