@@ -235,41 +235,60 @@ def main():
             r, g, b = pixels[x, y]
             is_land[y][x] = not is_water_pixel(r, g, b, lat)
 
-    # Step 2: Distance transform for smooth coastal slopes
-    print("Computing distance-to-coast transform...")
+    # Step 2: Continuous 2-pass distance transforms for both land and water
+    print("Computing continuous distance transforms (land + water)...")
     INF = 9999
-    dist = [[INF if is_land[y][x] else 0 for x in range(GRID_W)] for y in range(GRID_H)]
+    dist_land = [[INF if is_land[y][x] else 0 for x in range(GRID_W)] for y in range(GRID_H)]
+    dist_water = [[0 if is_land[y][x] else INF for x in range(GRID_W)] for y in range(GRID_H)]
 
     # Forward pass
     for y in range(GRID_H):
         for x in range(GRID_W):
-            if dist[y][x] != 0:
-                d = dist[y][x]
+            if dist_land[y][x] != 0:
+                d = dist_land[y][x]
                 if x > 0:
-                    d = min(d, dist[y][x - 1] + 1)
+                    d = min(d, dist_land[y][x - 1] + 1)
                 else:
-                    # Wrap around longitude at left edge!
-                    d = min(d, dist[y][GRID_W - 1] + 1)
+                    d = min(d, dist_land[y][GRID_W - 1] + 1)
                 if y > 0:
-                    d = min(d, dist[y - 1][x] + 1)
-                dist[y][x] = d
+                    d = min(d, dist_land[y - 1][x] + 1)
+                dist_land[y][x] = d
+
+            if dist_water[y][x] != 0:
+                d = dist_water[y][x]
+                if x > 0:
+                    d = min(d, dist_water[y][x - 1] + 1)
+                else:
+                    d = min(d, dist_water[y][GRID_W - 1] + 1)
+                if y > 0:
+                    d = min(d, dist_water[y - 1][x] + 1)
+                dist_water[y][x] = d
 
     # Backward pass
     for y in range(GRID_H - 1, -1, -1):
         for x in range(GRID_W - 1, -1, -1):
-            if dist[y][x] != 0:
-                d = dist[y][x]
+            if dist_land[y][x] != 0:
+                d = dist_land[y][x]
                 if x < GRID_W - 1:
-                    d = min(d, dist[y][x + 1] + 1)
+                    d = min(d, dist_land[y][x + 1] + 1)
                 else:
-                    # Wrap around longitude at right edge!
-                    d = min(d, dist[y][0] + 1)
+                    d = min(d, dist_land[y][0] + 1)
                 if y < GRID_H - 1:
-                    d = min(d, dist[y + 1][x] + 1)
-                dist[y][x] = d
+                    d = min(d, dist_land[y + 1][x] + 1)
+                dist_land[y][x] = d
 
-    # Step 3: Compute heights and biomes
-    print("Classifying biomes and elevations...")
+            if dist_water[y][x] != 0:
+                d = dist_water[y][x]
+                if x < GRID_W - 1:
+                    d = min(d, dist_water[y][x + 1] + 1)
+                else:
+                    d = min(d, dist_water[y][0] + 1)
+                if y < GRID_H - 1:
+                    d = min(d, dist_water[y + 1][x] + 1)
+                dist_water[y][x] = d
+
+    # Step 3: Compute continuous signed elevations and biomes
+    print("Classifying biomes and continuous signed elevations...")
     elevations = [0] * (GRID_W * GRID_H)
     biomes = [0] * (GRID_W * GRID_H)
 
@@ -282,8 +301,11 @@ def main():
             idx = row_offset + x
 
             if not is_land[y][x]:
-                # Water
-                elevations[idx] = 0
+                # Water: negative depth smoothly dropping from shore (-1) into deep ocean (-30)
+                d_w = dist_water[y][x]
+                depth = -int(min(30, max(1, round(d_w * 1.5))))
+                elevations[idx] = depth
+
                 # Choose ocean biome based on latitude
                 if abs(lat) > 65:
                     biomes[idx] = BIOME_INDEX["icesheet"]
@@ -292,12 +314,12 @@ def main():
                 else:
                     biomes[idx] = BIOME_INDEX["ocean"]
             else:
-                # Land
-                d_c = dist[y][x]
+                # Land: positive height rising smoothly from coast (+1) into interior
+                d_l = dist_land[y][x]
                 r, g, b = pixels[x, y]
 
-                # Base height rises smoothly from beach (1-2) to inland plain (4-8)
-                base_h = min(8.0, 1.0 + d_c * 0.45)
+                # Base height rises smoothly from beach (+1) to inland plain (+4 to +8)
+                base_h = min(8.0, 1.0 + d_l * 0.45)
 
                 # Mountain boost
                 mtn = get_mountain_boost(lat, lon)
@@ -311,7 +333,7 @@ def main():
                 elevations[idx] = max(1, min(final_h, 60))
 
                 # Biome
-                b_name = classify_biome(r, g, b, lat, d_c)
+                b_name = classify_biome(r, g, b, lat, d_l)
                 biomes[idx] = BIOME_INDEX[b_name]
 
     # Step 4: Write JSON

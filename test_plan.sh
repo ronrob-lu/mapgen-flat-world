@@ -48,6 +48,8 @@ minetest = {
     register_on_generated = function() end,
     register_chatcommand = function() end,
     register_on_newplayer = function() end,
+    register_on_respawnplayer = function() end,
+    register_on_joinplayer = function() end,
 }
 dofile('init.lua')
 print('✓ init.lua syntax and mock execution passed.')
@@ -80,6 +82,22 @@ assert h_n == 0 and b_n == 'ocean', f'North margin failed: {h_n}, {b_n}'
 h_s, b_s = q(0, -20000)
 assert h_s == 8 and b_s == 'icesheet', f'South margin failed: {h_s}, {b_s}'
 
+# Check Lisbon: on land
+h_lisbon, b_lisbon = q(-1480, 6670)
+assert h_lisbon > 0, f'Lisbon must be on land, got height {h_lisbon}'
+
+# Check Dover: on land
+h_dover, b_dover = q(190, 8770)
+assert h_dover > 0, f'Dover must be on land, got height {h_dover}'
+
+# Check Calais: on land
+h_calais, b_calais = q(360, 8710)
+assert h_calais > 0, f'Calais must be on land, got height {h_calais}'
+
+# Check New York: on land
+h_ny, b_ny = q(-12650, 7020)
+assert h_ny > 0, f'New York must be on land, got height {h_ny}'
+
 # Check Sahara: desert
 h_sahara, b_sahara = q(3440, 4300)
 assert b_sahara == 'desert', f'Sahara biome expected desert, got {b_sahara}'
@@ -88,7 +106,7 @@ assert b_sahara == 'desert', f'Sahara biome expected desert, got {b_sahara}'
 h_am, b_am = q(-10300, -500)
 assert b_am == 'rainforest', f'Amazon biome expected rainforest, got {b_am}'
 
-print('✓ Geographic assertions passed (North Water, South Ice, Sahara Desert, Amazon Rainforest)!')
+print('✓ Geographic assertions passed (Lisbon, Dover, Calais, New York, North Water, South Ice, Sahara, Amazon)!')
 "
 
 echo "=== All tests completed successfully! ==="

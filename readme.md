@@ -28,7 +28,11 @@ Because Luanti's world boundary is quadratic (square) while Earth maps are $2:1$
 Instead of forcing your Luanti engine to parse an enormous 78.6 MB JPEG on every chunk generation, this mod ships with a preprocessed, compact **`world_map.json`** ($2048 \times 1024$ grid):
 - 🏎️ **Loads in under 0.1 seconds** via Luanti's native C++ JSON parser!
 - 💾 Instant $O(1)$ lookups during terrain generation.
-- 🏖️ **Bilinear Elevation Smoothing**: Smooth beaches sloping gently into the sea, with gentle Perlin micro-relief to avoid artificial stepped cliffs.
+### ⚡ **Organic Anti-Aliased Landscapes (No Squares!)**
+In real life, nature never builds straight square boxes! We completely eliminated grid pixel steps and square edges through a two-stage organic smoothing engine:
+- 🌀 **Coordinate Domain Warping**: A multi-octave 2D Perlin turbulence field continuously deforms sample coordinates before querying the map. Rigid square grid lines are bent into winding, realistic, fractal coastlines, bays, and peninsulas!
+- 🌊 **Continuous Signed Distance Fields (SDF)**: Ocean water carries continuous negative depths ($-1$ to $-30$) while land carries positive elevations ($+1$ to $+45$). Waterlines cross grid cells smoothly at arbitrary angles instead of dropping off in 30-block square cliffs.
+- 🎨 **Cubic Hermite Climate Blending**: Heat and humidity are continuously interpolated between climate zones. Biomes feather and merge organically without boxy pixel boundaries!
 
 ### 🌴 **Powered by `biomegen`**
 Real geographic biomes come alive with authentic native foliage, trees, and surfaces:
@@ -39,12 +43,16 @@ Real geographic biomes come alive with authentic native foliage, trees, and surf
 - 🌾 **Savannas & Grasslands**: Sun-drenched acacia plains in Africa and sweeping steppes in Eurasia.
 - 🏔️ **Alpine Peaks**: Towering mountain ranges including the Himalayas / Mount Everest ($Y = 44$), the Andes, the Alps, and the Rockies.
 
-### ✈️ **In-Game Fast Travel (`/worldmap`)**
+### ✈️ **In-Game Fast Travel & Spawn in Lisbon (`/worldmap`, `/dover`, `/calais`, `/newyork`)**
 Start exploring in seconds with built-in landmark navigation:
-- `/worldmap` — View your current real-world latitude, longitude, elevation, and biome.
-- `/worldmap list` — Browse all major destinations.
-- `/worldmap <city>` — Instantly teleport to `london`, `newyork`, `tokyo`, `cairo`, `sydney`, `amazon`, `himalayas`, `sahara`, or `southpole`!
-- 🛡️ **Anti-Drown Spawn Protection**: Automatically places new players safely onto coastal land instead of dropping them in the open Atlantic Ocean.
+- 🇵🇹 **Default Spawn in Lisbon (Portugal)**: All players spawn safely on land in Lisbon (`X=-1480, Z=6670`). If an existing player was trapped in the Atlantic Ocean at `(0, 0)`, they are automatically rescued and relocated to Lisbon on join!
+- ⚡ **Direct Shortcut Commands**:
+  - `/spawn` or `/lisbon` — Teleport to Lisbon (Portugal).
+  - `/dover` — Teleport to Dover (GB) on the White Cliffs of Kent.
+  - `/calais` — Teleport to Calais (France).
+  - `/newyork` — Teleport to New York (USA).
+- 🧭 `/worldmap` — View your current real-world latitude, longitude, elevation, and biome.
+- 📋 `/worldmap list` — Browse all major destinations (`lisbon`, `dover`, `calais`, `newyork`, `london`, `paris`, `tokyo`, `cairo`, `sydney`, `amazon`, `himalayas`, `sahara`, `southpole`, `north`).
 
 ---
 
@@ -70,6 +78,8 @@ A Python build tool is included right in the repository:
 # Regenerates world_map.json directly from Large_World_Map_bright.jpg
 python3 build_world_json.py
 ```
+
+> 📌 **Note on `Large_World_Map_bright.jpg`**: The 78.6 MB image is **not needed by Luanti** at runtime and is ignored in `.gitignore`. Only `world_map.json` is required to run the mod, keeping git repositories small and fast!
 
 Run automated validation tests:
 ```bash
