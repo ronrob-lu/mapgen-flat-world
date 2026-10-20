@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 build_world_json.py
-Generates a preprocessed world_map.json from Large_World_Map_bright.jpg
+Generates an anti-aliased, continuous world_map.json from Large_World_Map_bright.jpg
 for the Luanti / Minetest world mapgen mod.
 """
 
@@ -13,7 +13,6 @@ import math
 import colorsys
 from PIL import Image
 
-# Allow processing large images
 Image.MAX_IMAGE_PIXELS = None
 
 INPUT_IMAGE = "Large_World_Map_bright.jpg"
@@ -22,14 +21,11 @@ OUTPUT_JSON = "world_map.json"
 GRID_W = 2048
 GRID_H = 1024
 
-# Luanti world coordinate limits
 LUANTI_X_MIN = -30912
 LUANTI_X_MAX = 30927
 LUANTI_Z_MIN = -30912
 LUANTI_Z_MAX = 30927
 
-# Map Z coverage (centered on Equator Z=0, maintaining 2:1 aspect ratio)
-# Width = 61840, Height = 30920
 MAP_Z_MIN = -15460
 MAP_Z_MAX = 15460
 
@@ -51,16 +47,13 @@ BIOME_PALETTE = [
 BIOME_INDEX = {name: i for i, name in enumerate(BIOME_PALETTE)}
 
 def is_water_pixel(r, g, b, lat):
-    """Determine if a pixel is ocean or water body."""
-    # Near extreme south (Antarctica), bright surfaces are ice land, not water
+    """Accurately distinguish water from land."""
     if lat < -62:
         if r > 120 and g > 120 and b > 110:
             return False
 
-    # Standard ocean blue: blue is dominant
     if b > r + 25 and b > 75 and r < 125 and (b > g * 0.82):
         return True
-    # Deep dark ocean or bright shelf
     if b > 135 and (b > r * 1.45) and (b > g * 0.88):
         return True
     if b > 180 and r < 80 and g < 160:
@@ -68,142 +61,134 @@ def is_water_pixel(r, g, b, lat):
 
     return False
 
-def classify_biome(r, g, b, lat, dist_coast):
-    """Classify land pixel into Luanti biome based on color, latitude, and coastal distance."""
+def smooth_falloff(dist):
+    """Smooth cosine falloff from 1.0 at dist=0 to 0.0 at dist=1."""
+    if dist >= 1.0:
+        return 0.0
+    return 0.5 * (1.0 + math.cos(math.pi * dist))
+
+def classify_biome(r, g, b, lat, lon, dist_coast, mtn=0.0):
+    """Classify land pixel into Luanti biome based on true image color and organic climate."""
     abs_lat = abs(lat)
     r_n, g_n, b_n = r / 255.0, g / 255.0, b / 255.0
     h_val, s_val, v_val = colorsys.rgb_to_hsv(r_n, g_n, b_n)
     deg = h_val * 360.0
 
-    # 1. Polar ice sheet & glaciers (Antarctica, Greenland, polar ice cap)
-    if abs_lat > 75:
-        if v_val > 0.45 or (r > 130 and g > 130 and b > 120):
-            return "icesheet"
-    if abs_lat > 60 and r > 180 and g > 170 and b > 150 and s_val < 0.20:
+    # Organic continuous temperature with gentle harmonic turbulence (eliminates dead-straight lines)
+    temp = 1.0 - (abs_lat / 90.0) ** 1.35
+    temp += 0.04 * math.sin(lat * 0.12 + lon * 0.08) + 0.03 * math.cos(lat * 0.07 - lon * 0.15)
+    if mtn > 10.0:
+        temp = max(0.0, temp - min(0.30, mtn / 90.0))
+
+    # 1. Polar ice sheet & Glaciers (Antarctica, Greenland, polar ice cap, snow peaks)
+    if lat < -65.0:
+        return "icesheet"
+    if lat > 68.0 and -60.0 <= lon <= -20.0 and v_val > 0.60:
+        return "icesheet"
+    if v_val > 0.85 and s_val < 0.12 and (temp < 0.50 or mtn > 20.0):
+        return "icesheet"
+    if temp < 0.22 and v_val > 0.60 and s_val < 0.25:
         return "icesheet"
 
-    # 2. Tundra (high latitude cold barrens)
-    if abs_lat > 65:
-        if v_val > 0.65 and s_val < 0.20:
-            return "icesheet"
-        return "tundra"
+    # 2. Arid / Deserts (warm hues: red, orange, yellow, tan)
+    if (deg >= 15.0 and deg <= 65.0) and (r > 150 and g > 120 and r >= g):
+        # Red sandstone deserts (Australian Outback, American Southwest)
+        if (deg < 28.0 or r > g + 40) and s_val > 0.25:
+            return "sandstone_desert" if temp > 0.45 else "cold_desert"
+        # Sand deserts (Sahara, Arabia, Kalahari)
+        if v_val > 0.55 and s_val > 0.15:
+            return "desert" if temp > 0.50 else "cold_desert"
+        # Rocky / dry barrens
+        return "desert" if temp > 0.52 else "cold_desert"
 
-    # 3. Hot deserts (Sahara, Arabian Peninsula, Kalahari, Australian Outback)
-    if (deg >= 25 and deg <= 65) and (r > 180 and g > 160) and b < r:
-        if abs_lat > 36 or v_val < 0.70:
-            return "cold_desert"
-        if r > 220 and g > 190 and b < 160:
-            return "desert"
-        return "desert"
-    if r > 210 and g > 185 and b < 170 and abs_lat < 36:
-        return "desert"
-
-    # 4. Cold desert & high plateaus (Tibet, Gobi, Altiplano)
-    if (deg >= 20 and deg <= 55) and abs_lat > 25:
-        if s_val < 0.35 and v_val > 0.45:
-            return "cold_desert"
-
-    # 5. Taiga / Boreal Forest (Siberia, Canada, Scandinavia)
-    if lat >= 52:
-        return "taiga"
-
-    # 6. Rainforest (tropical, deep lush green)
-    if abs_lat <= 15:
-        if (deg >= 65 and deg <= 165) and s_val > 0.22:
-            return "rainforest"
-        if g > r and g > b:
-            return "rainforest"
-        return "savanna"
-
-    # 7. Savanna (warm, sub-tropical, olive/yellow-green)
-    if abs_lat <= 32:
-        if (deg >= 35 and deg <= 75):
-            return "savanna"
-        if s_val < 0.35 and v_val > 0.4:
-            return "savanna"
-        if (deg >= 75 and deg <= 150) and s_val > 0.3:
-            return "rainforest"
-        return "savanna"
-
-    # 8. Temperate forests & grasslands (lat 30 to 52)
-    if deg >= 70 and deg <= 150:
-        if s_val > 0.38 and v_val > 0.45:
-            return "deciduous_forest"
-        elif s_val > 0.28 and v_val < 0.42:
-            return "coniferous_forest"
-        else:
-            return "grassland"
-
-    if (deg >= 45 and deg <= 70) and s_val < 0.4:
-        return "grassland"
-
-    if s_val < 0.25:
+    # High altitude cold arid plateaus (Tibet, Altiplano, high mountain barrens)
+    if mtn > 22.0 and s_val < 0.35 and temp < 0.48:
         return "cold_desert"
 
-    return "deciduous_forest"
+    # 3. Dense forests & vegetated land (green / olive hues)
+    if (deg >= 58.0 and deg <= 165.0) or (g > r * 0.95 and g > b * 1.1):
+        # Rainforest: dense saturated tropical green in warm humid climates
+        if temp > 0.62 and (deg >= 58.0 or g > r) and (s_val > 0.70 or v_val <= 0.44):
+            return "rainforest"
+
+        # Taiga: dark evergreen needleleaf in cold northern zones
+        if deg >= 80.0 and v_val < 0.38 and temp < 0.45 and lat > 0:
+            return "taiga"
+
+        # Coniferous forest: cool darker forest / mountain forest
+        if v_val < 0.44 and (temp < 0.55 or mtn > 10.0):
+            return "coniferous_forest"
+
+        # Deciduous forest: bright broadleaf green
+        if v_val >= 0.40 and s_val > 0.35:
+            return "deciduous_forest"
+
+        # Open scrub / savanna / plains
+        return "savanna" if temp > 0.60 else "grassland"
+
+    # 4. Dry grass / Savanna / Steppe / Plains (yellowish-green or muted tan)
+    if deg >= 40.0 and deg <= 80.0:
+        if temp > 0.62:
+            return "savanna"
+        elif temp >= 0.30:
+            return "grassland"
+        else:
+            return "tundra"
+
+    # 5. Cold subpolar barrens & tundra
+    if temp < 0.28:
+        return "tundra"
+    if temp < 0.45 and lat > 0:
+        return "taiga"
+    return "savanna" if temp > 0.62 else "grassland"
 
 def get_mountain_boost(lat, lon):
-    """Calculate elevation boost for mountain ranges and high plateaus."""
+    """Calculate elevation boost with C1 continuous smooth falloff (zero square borders)."""
     boost = 0.0
 
-    # Himalayas & Tibetan Plateau (70°E to 104°E, 26°N to 38°N)
-    if 26.0 <= lat <= 38.0 and 70.0 <= lon <= 104.0:
-        d = ((lat - 33.0) / 6.0)**2 + ((lon - 88.0) / 16.0)**2
-        if d < 1.0:
-            boost = max(boost, 26.0 * (1.0 - d))
-        # Himalayan ridge
-        d_ridge = ((lat - 28.5) / 2.5)**2 + ((lon - 85.0) / 10.0)**2
-        if d_ridge < 1.0:
-            boost = max(boost, 36.0 * (1.0 - d_ridge))
+    # Himalayas & Tibetan Plateau
+    d_him = math.hypot((lat - 32.0) / 7.0, (lon - 88.0) / 16.0)
+    boost = max(boost, 38.0 * smooth_falloff(d_him))
 
-    # Andes (Venezuela down to Patagonia: 11°N to 55°S, 80°W to 64°W)
-    if -55.0 <= lat <= 11.0 and -80.0 <= lon <= -64.0:
-        center_lon = -70.0 - (lat * 0.12)
-        d_lon = abs(lon - center_lon)
-        if d_lon < 5.0:
-            boost = max(boost, 25.0 * (1.0 - d_lon / 5.0))
+    # Andes (Venezuela down to Patagonia)
+    center_lon = -70.0 - (lat * 0.12)
+    d_and_lat = abs(lat - (-22.0)) / 33.0
+    d_and_lon = abs(lon - center_lon) / 5.5
+    d_and = math.hypot(d_and_lat, d_and_lon)
+    boost = max(boost, 26.0 * smooth_falloff(d_and))
 
-    # Rocky Mountains & North American Cordillera (32°N to 65°N, 126°W to 105°W)
-    if 32.0 <= lat <= 65.0 and -126.0 <= lon <= -105.0:
-        center_lon = -118.0 + (lat - 32.0) * 0.22
-        d_lon = abs(lon - center_lon)
-        if d_lon < 7.0:
-            boost = max(boost, 22.0 * (1.0 - d_lon / 7.0))
+    # Rocky Mountains & North American Cordillera
+    center_lon = -118.0 + (lat - 32.0) * 0.22
+    d_roc_lat = abs(lat - 48.0) / 18.0
+    d_roc_lon = abs(lon - center_lon) / 7.5
+    d_roc = math.hypot(d_roc_lat, d_roc_lon)
+    boost = max(boost, 24.0 * smooth_falloff(d_roc))
 
-    # Alps (Europe: 43°N to 48°N, 5°E to 16°E)
-    if 43.0 <= lat <= 48.0 and 5.0 <= lon <= 16.0:
-        d = ((lat - 46.0) / 3.0)**2 + ((lon - 10.0) / 6.0)**2
-        if d < 1.0:
-            boost = max(boost, 20.0 * (1.0 - d))
+    # Alps (Europe)
+    d_alps = math.hypot((lat - 46.0) / 3.0, (lon - 10.0) / 7.0)
+    boost = max(boost, 20.0 * smooth_falloff(d_alps))
 
-    # Caucasus (40°N to 44°N, 39°E to 49°E)
-    if 40.0 <= lat <= 44.0 and 39.0 <= lon <= 49.0:
-        d = ((lat - 42.0) / 2.0)**2 + ((lon - 44.0) / 5.0)**2
-        if d < 1.0:
-            boost = max(boost, 18.0 * (1.0 - d))
+    # Caucasus
+    d_cauc = math.hypot((lat - 42.0) / 2.5, (lon - 44.0) / 5.5)
+    boost = max(boost, 18.0 * smooth_falloff(d_cauc))
 
-    # Ural Mountains (50°N to 68°N, 57°E to 63°E)
-    if 50.0 <= lat <= 68.0 and 57.0 <= lon <= 63.0:
-        d_lon = abs(lon - 60.0)
-        if d_lon < 2.5:
-            boost = max(boost, 12.0 * (1.0 - d_lon / 2.5))
+    # Ural Mountains
+    d_ural_lat = abs(lat - 59.0) / 10.0
+    d_ural_lon = abs(lon - 60.0) / 3.0
+    boost = max(boost, 12.0 * smooth_falloff(math.hypot(d_ural_lat, d_ural_lon)))
 
-    # Atlas Mountains (North Africa: 30°N to 35°N, 10°W to 4°E)
-    if 30.0 <= lat <= 35.0 and -10.0 <= lon <= 4.0:
-        d = ((lat - 32.5) / 2.5)**2 + ((lon + 3.0) / 7.0)**2
-        if d < 1.0:
-            boost = max(boost, 14.0 * (1.0 - d))
+    # Atlas Mountains (North Africa)
+    d_atlas = math.hypot((lat - 32.5) / 3.0, (lon + 3.0) / 7.0)
+    boost = max(boost, 14.0 * smooth_falloff(d_atlas))
 
-    # Greenland Ice Sheet interior (65°N to 82°N, 50°W to 25°W)
-    if 65.0 <= lat <= 82.0 and -50.0 <= lon <= -25.0:
-        d = ((lat - 74.0) / 9.0)**2 + ((lon - (-37.5)) / 13.0)**2
-        if d < 1.0:
-            boost = max(boost, 12.0 * (1.0 - d))
+    # Greenland Ice Sheet interior
+    d_grn = math.hypot((lat - 74.0) / 9.0, (lon - (-37.5)) / 13.0)
+    boost = max(boost, 14.0 * smooth_falloff(d_grn))
 
-    # Antarctica ice plateau (lat < -70°)
-    if lat < -70.0:
-        dist_pole = abs(lat + 90.0)
-        boost = max(boost, 8.0 + (1.0 - dist_pole / 20.0) * 10.0)
+    # Antarctica ice plateau
+    if lat < -65.0:
+        d_ant = abs(lat - (-90.0)) / 25.0
+        boost = max(boost, 12.0 * smooth_falloff(d_ant))
 
     return boost
 
@@ -235,61 +220,68 @@ def main():
             r, g, b = pixels[x, y]
             is_land[y][x] = not is_water_pixel(r, g, b, lat)
 
-    # Step 2: Continuous 2-pass distance transforms for both land and water
-    print("Computing continuous distance transforms (land + water)...")
-    INF = 9999
-    dist_land = [[INF if is_land[y][x] else 0 for x in range(GRID_W)] for y in range(GRID_H)]
-    dist_water = [[0 if is_land[y][x] else INF for x in range(GRID_W)] for y in range(GRID_H)]
+    # Step 2: 8-connected Euclidean Chamfer distance transform (prevents diamond/square contours)
+    print("Computing 8-connected Euclidean Chamfer distance transforms...")
+    INF = 9999.0
+    SQRT2 = 1.4142
 
-    # Forward pass
+    dist_land = [[INF if is_land[y][x] else 0.0 for x in range(GRID_W)] for y in range(GRID_H)]
+    dist_water = [[0.0 if is_land[y][x] else INF for x in range(GRID_W)] for y in range(GRID_H)]
+
+    # Forward pass (8-connected)
     for y in range(GRID_H):
         for x in range(GRID_W):
-            if dist_land[y][x] != 0:
+            # Land distance to coast
+            if dist_land[y][x] != 0.0:
                 d = dist_land[y][x]
-                if x > 0:
-                    d = min(d, dist_land[y][x - 1] + 1)
-                else:
-                    d = min(d, dist_land[y][GRID_W - 1] + 1)
+                xm1 = x - 1 if x > 0 else GRID_W - 1
+                xp1 = x + 1 if x < GRID_W - 1 else 0
+                d = min(d, dist_land[y][xm1] + 1.0)
                 if y > 0:
-                    d = min(d, dist_land[y - 1][x] + 1)
+                    d = min(d, dist_land[y - 1][x] + 1.0)
+                    d = min(d, dist_land[y - 1][xm1] + SQRT2)
+                    d = min(d, dist_land[y - 1][xp1] + SQRT2)
                 dist_land[y][x] = d
 
-            if dist_water[y][x] != 0:
+            # Water distance to coast
+            if dist_water[y][x] != 0.0:
                 d = dist_water[y][x]
-                if x > 0:
-                    d = min(d, dist_water[y][x - 1] + 1)
-                else:
-                    d = min(d, dist_water[y][GRID_W - 1] + 1)
+                xm1 = x - 1 if x > 0 else GRID_W - 1
+                xp1 = x + 1 if x < GRID_W - 1 else 0
+                d = min(d, dist_water[y][xm1] + 1.0)
                 if y > 0:
-                    d = min(d, dist_water[y - 1][x] + 1)
+                    d = min(d, dist_water[y - 1][x] + 1.0)
+                    d = min(d, dist_water[y - 1][xm1] + SQRT2)
+                    d = min(d, dist_water[y - 1][xp1] + SQRT2)
                 dist_water[y][x] = d
 
-    # Backward pass
+    # Backward pass (8-connected)
     for y in range(GRID_H - 1, -1, -1):
         for x in range(GRID_W - 1, -1, -1):
-            if dist_land[y][x] != 0:
+            xm1 = x - 1 if x > 0 else GRID_W - 1
+            xp1 = x + 1 if x < GRID_W - 1 else 0
+
+            if dist_land[y][x] != 0.0:
                 d = dist_land[y][x]
-                if x < GRID_W - 1:
-                    d = min(d, dist_land[y][x + 1] + 1)
-                else:
-                    d = min(d, dist_land[y][0] + 1)
+                d = min(d, dist_land[y][xp1] + 1.0)
                 if y < GRID_H - 1:
-                    d = min(d, dist_land[y + 1][x] + 1)
+                    d = min(d, dist_land[y + 1][x] + 1.0)
+                    d = min(d, dist_land[y + 1][xm1] + SQRT2)
+                    d = min(d, dist_land[y + 1][xp1] + SQRT2)
                 dist_land[y][x] = d
 
-            if dist_water[y][x] != 0:
+            if dist_water[y][x] != 0.0:
                 d = dist_water[y][x]
-                if x < GRID_W - 1:
-                    d = min(d, dist_water[y][x + 1] + 1)
-                else:
-                    d = min(d, dist_water[y][0] + 1)
+                d = min(d, dist_water[y][xp1] + 1.0)
                 if y < GRID_H - 1:
-                    d = min(d, dist_water[y + 1][x] + 1)
+                    d = min(d, dist_water[y + 1][x] + 1.0)
+                    d = min(d, dist_water[y + 1][xm1] + SQRT2)
+                    d = min(d, dist_water[y + 1][xp1] + SQRT2)
                 dist_water[y][x] = d
 
-    # Step 3: Compute continuous signed elevations and biomes
-    print("Classifying biomes and continuous signed elevations...")
-    elevations = [0] * (GRID_W * GRID_H)
+    # Step 3: Compute continuous signed elevations (logarithmic, no flat clamps)
+    print("Classifying biomes and generating continuous floating-point elevations...")
+    raw_elev = [[0.0] * GRID_W for _ in range(GRID_H)]
     biomes = [0] * (GRID_W * GRID_H)
 
     for y in range(GRID_H):
@@ -301,43 +293,55 @@ def main():
             idx = row_offset + x
 
             if not is_land[y][x]:
-                # Water: negative depth smoothly dropping from shore (-1) into deep ocean (-30)
+                # Water: continuous smooth logarithmic seabed depth
                 d_w = dist_water[y][x]
-                depth = -int(min(30, max(1, round(d_w * 1.5))))
-                elevations[idx] = depth
-
-                # Choose ocean biome based on latitude
-                if abs(lat) > 65:
-                    biomes[idx] = BIOME_INDEX["icesheet"]
-                elif abs(lat) > 50:
-                    biomes[idx] = BIOME_INDEX["taiga"]
-                else:
-                    biomes[idx] = BIOME_INDEX["ocean"]
+                depth = -(1.0 + math.log1p(d_w) * 6.5)
+                raw_elev[y][x] = max(-30.0, depth)
+                biomes[idx] = BIOME_INDEX["ocean"]
             else:
-                # Land: positive height rising smoothly from coast (+1) into interior
+                # Land: smooth continuous rising elevation, no flat capped plateaus
                 d_l = dist_land[y][x]
                 r, g, b = pixels[x, y]
 
-                # Base height rises smoothly from beach (+1) to inland plain (+4 to +8)
-                base_h = min(8.0, 1.0 + d_l * 0.45)
-
-                # Mountain boost
+                base_h = 1.0 + math.log1p(d_l) * 2.2
                 mtn = get_mountain_boost(lat, lon)
                 total_h = base_h + mtn
 
-                # If polar ice sheet (Antarctica)
                 if lat < -65:
                     total_h = max(total_h, 6.0)
 
-                final_h = int(round(total_h))
-                elevations[idx] = max(1, min(final_h, 60))
+                raw_elev[y][x] = max(1.0, min(total_h, 60.0))
 
-                # Biome
-                b_name = classify_biome(r, g, b, lat, d_l)
+                b_name = classify_biome(r, g, b, lat, lon, d_l, mtn)
                 biomes[idx] = BIOME_INDEX[b_name]
 
-    # Step 4: Write JSON
-    print(f"Generating JSON output: '{OUTPUT_JSON}'...")
+    # Step 4: 3x3 Gaussian smoothing filter on the continuous elevation field
+    # Completely dissolves any remaining discrete grid stepping artifacts
+    print("Applying 3x3 anti-aliasing spatial filter to elevation field...")
+    smoothed_elev = [0.0] * (GRID_W * GRID_H)
+    kernel = [
+        [1.0/16.0, 2.0/16.0, 1.0/16.0],
+        [2.0/16.0, 4.0/16.0, 2.0/16.0],
+        [1.0/16.0, 2.0/16.0, 1.0/16.0]
+    ]
+
+    for y in range(GRID_H):
+        row_offset = y * GRID_W
+        ym1 = max(0, y - 1)
+        yp1 = min(GRID_H - 1, y + 1)
+
+        for x in range(GRID_W):
+            xm1 = x - 1 if x > 0 else GRID_W - 1
+            xp1 = x + 1 if x < GRID_W - 1 else 0
+
+            val = (kernel[0][0] * raw_elev[ym1][xm1] + kernel[0][1] * raw_elev[ym1][x] + kernel[0][2] * raw_elev[ym1][xp1] +
+                   kernel[1][0] * raw_elev[y][xm1]   + kernel[1][1] * raw_elev[y][x]   + kernel[1][2] * raw_elev[y][xp1] +
+                   kernel[2][0] * raw_elev[yp1][xm1] + kernel[2][1] * raw_elev[yp1][x] + kernel[2][2] * raw_elev[yp1][xp1])
+
+            smoothed_elev[row_offset + x] = round(val, 1)
+
+    # Step 5: Write JSON
+    print(f"Writing '{OUTPUT_JSON}'...")
     data_dict = {
         "width": GRID_W,
         "height": GRID_H,
@@ -352,13 +356,11 @@ def main():
         "water_level": 0,
         "sea_floor": -30,
         "biome_palette": BIOME_PALETTE,
-        "elevations": elevations,
+        "elevations": smoothed_elev,
         "biomes": biomes
     }
 
-    t_write = time.time()
     with open(OUTPUT_JSON, "w") as f:
-        # Use compact formatting
         json.dump(data_dict, f, separators=(",", ":"))
 
     file_size_mb = os.path.getsize(OUTPUT_JSON) / (1024 * 1024)

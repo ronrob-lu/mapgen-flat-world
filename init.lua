@@ -115,6 +115,7 @@ local np_fine_relief = {
 }
 
 local nobj_warp_x, nobj_warp_z, nobj_fine_relief = nil, nil, nil
+local pnoise_warp_x, pnoise_warp_z = nil, nil
 local nvals_warp_x = {}
 local nvals_warp_z = {}
 local nvals_fine_relief = {}
@@ -213,12 +214,22 @@ minetest.register_on_mods_loaded(function()
     c_snowblock = minetest.get_content_id("default:snowblock")
     c_snow      = minetest.get_content_id("default:snow")
 
-    -- Hook into biomegen for living vegetation & biomes
+    -- Initialize standalone Perlin noise objects for point-based coordinate warping
+    if PerlinNoise then
+        pnoise_warp_x = PerlinNoise(np_warp_x)
+        pnoise_warp_z = PerlinNoise(np_warp_z)
+    end
+
+    -- Hook into biomegen for living vegetation & biomes with matching warped coordinates
     if biomegen then
         local orig_calc = biomegen.calc_biome_from_noise
         biomegen.calc_biome_from_noise = function(heat, humid, pos)
-            -- Apply domain warping noise to pos for seamless organic biome shapes
-            local _, c_heat, c_humid, _ = get_smooth_terrain_info(pos.x, pos.z)
+            local wx, wz = 0, 0
+            if pnoise_warp_x and pnoise_warp_z then
+                wx = pnoise_warp_x:get_2d({x = pos.x, y = pos.z})
+                wz = pnoise_warp_z:get_2d({x = pos.x, y = pos.z})
+            end
+            local _, c_heat, c_humid, _ = get_smooth_terrain_info(pos.x + wx, pos.z + wz)
             return orig_calc(c_heat, c_humid, pos)
         end
 
@@ -286,9 +297,6 @@ minetest.register_on_generated(function(minp, maxp, seed)
     local ystride = area.ystride
 
     for z = minp.z, maxp.z do
-        local is_south_ice = (z < MAP_Z_MIN)
-        local is_north_water = (z > MAP_Z_MAX)
-
         for x = minp.x, maxp.x do
             -- Apply coordinate domain warping: turns square grid cells into curving fractal shorelines!
             local wx = nvals_warp_x[noise_idx] or 0
@@ -296,7 +304,10 @@ minetest.register_on_generated(function(minp, maxp, seed)
             local warped_x = x + wx
             local warped_z = z + wz
 
-            local base_h, _, _, b_name = get_smooth_terrain_info(warped_x, warped_z)
+            local is_south_ice = (warped_z < MAP_Z_MIN)
+            local is_north_water = (warped_z > MAP_Z_MAX)
+
+            local base_h, _, _, _ = get_smooth_terrain_info(warped_x, warped_z)
             local relief = nvals_fine_relief[noise_idx] or 0
 
             local final_h
@@ -323,8 +334,8 @@ minetest.register_on_generated(function(minp, maxp, seed)
                     end
                     vi = vi + ystride
                 end
-            elseif is_south_ice or b_name == "icesheet" then
-                -- Polar ice sheet: solid ice and snow
+            elseif is_south_ice then
+                -- South margin: polar ice cap
                 local surface_y = math.floor(final_h + 0.5)
                 for y = minp.y, maxp.y do
                     if y <= SEA_FLOOR then
@@ -339,7 +350,7 @@ minetest.register_on_generated(function(minp, maxp, seed)
                     vi = vi + ystride
                 end
             else
-                -- Land column: solid stone up to smoothly curved surface
+                -- Land column: solid stone up to smoothly curved surface (biomegen sets grass/sand/trees)
                 local surface_y = math.max(1, math.floor(final_h + 0.5))
                 for y = minp.y, maxp.y do
                     if y <= surface_y then
@@ -375,9 +386,9 @@ minetest.set_mapgen_setting("static_spawnpoint", string.format("%d,%d,%d", SPAWN
 -- Geographic landmarks and teleport destinations
 local major_locations = {
     ["lisbon"]    = {x = -1480,  z = 6670,  name = "Lisbon (Portugal) [Spawn]"},
-    ["dover"]     = {x = 190,    z = 8770,  name = "Dover (GB)"},
-    ["calais"]    = {x = 360,    z = 8710,  name = "Calais (France)"},
-    ["newyork"]   = {x = -12650, z = 7020,  name = "New York (USA)"},
+    ["dover"]     = {x = 150,    z = 8780,  name = "Dover (GB)"},
+    ["calais"]    = {x = 380,    z = 8690,  name = "Calais (France)"},
+    ["newyork"]   = {x = -12630, z = 7030,  name = "New York (USA)"},
     ["london"]    = {x = 0,      z = 8847,  name = "London (UK)"},
     ["paris"]     = {x = 395,    z = 8383,  name = "Paris (France)"},
     ["cairo"]     = {x = 5360,   z = 5170,  name = "Cairo (Egypt)"},
@@ -396,7 +407,7 @@ local function teleport_player_to(player, loc)
     player:set_pos({x = loc.x, y = y_target, z = loc.z})
 end
 
--- Teleport command
+-- Direct teleport commands
 minetest.register_chatcommand("worldmap", {
     params = "[location / list / info]",
     description = "Teleport to major Earth landmarks or view current real-world coordinates",
@@ -415,8 +426,8 @@ minetest.register_chatcommand("worldmap", {
                 "Current World Map Position:\n" ..
                 "• Coordinates: X=%.0f, Y=%.0f, Z=%.0f\n" ..
                 "• Geographical: %.2f° %s, %.2f° %s\n" ..
-                "• Biome: %s (Base Elevation: %.0f)\n" ..
-                "Type '/worldmap list' to see landmarks you can teleport to.",
+                "• Biome: %s (Base Elevation: %.1f)\n" ..
+                "Type '/worldmap list' or '/goto <lat> <lon>' to explore.",
                 p.x, p.y, p.z,
                 math.abs(lat), (lat >= 0 and "N" or "S"),
                 math.abs(lon), (lon >= 0 and "E" or "W"),
@@ -436,6 +447,62 @@ minetest.register_chatcommand("worldmap", {
             return false, "Unknown location '" .. param .. "'. Type '/worldmap list' for available locations."
         end
     end,
+})
+
+-- /goto <lat> <lon> allows teleporting to ANY point on Earth
+minetest.register_chatcommand("goto", {
+    params = "<latitude> <longitude>",
+    description = "Teleport to real-world latitude and longitude (e.g. /goto 51.13 1.31 for Dover)",
+    func = function(name, param)
+        local player = minetest.get_player_by_name(name)
+        if not player then return false, "Player not found." end
+
+        local parts = param:split()
+        local lat = tonumber(parts[1])
+        local lon = tonumber(parts[2])
+
+        if not (lat and lon) then
+            return false, "Usage: /goto <latitude> <longitude> (e.g. /goto 51.13 1.31 for Dover)"
+        end
+
+        local x = (lon / 180.0) * LUANTI_X_MAX
+        local z = (lat / 90.0) * MAP_Z_MAX
+
+        local h, _, _, b_name = get_smooth_terrain_info(x, z)
+        local y_target = math.max(2, math.floor(h + 2))
+        player:set_pos({x = x, y = y_target, z = z})
+
+        return true, string.format("Teleported to %.2f°%s, %.2f°%s (X=%.0f, Z=%.0f) | Biome: %s, Elevation: %.1f",
+            math.abs(lat), (lat >= 0 and "N" or "S"),
+            math.abs(lon), (lon >= 0 and "E" or "W"),
+            x, z, b_name, h)
+    end
+})
+
+-- /fly grants fast flying and noclip privileges for testing the world
+minetest.register_chatcommand("fly", {
+    description = "Grant fast flying and noclip privileges to inspect the world quickly",
+    func = function(name)
+        local privs = minetest.get_player_privs(name)
+        privs.fly = true
+        privs.fast = true
+        privs.noclip = true
+        minetest.set_player_privs(name, privs)
+        return true, "Granted fly, fast, and noclip privileges! Press 'K' to toggle fly, 'J' to toggle fast speed."
+    end
+})
+
+-- /flyspeed <speed> sets flying movement speed
+minetest.register_chatcommand("flyspeed", {
+    params = "[speed_multiplier]",
+    description = "Set movement speed multiplier (e.g. /flyspeed 5 or /flyspeed 10) to cross continents quickly",
+    func = function(name, param)
+        local player = minetest.get_player_by_name(name)
+        if not player then return false, "Player not found." end
+        local spd = tonumber(param) or 5.0
+        player:set_physics_override({speed = spd, jump = 1.5, gravity = 1.0})
+        return true, string.format("Movement speed multiplier set to %.1fx! (Default is 1.0)", spd)
+    end
 })
 
 -- Quick convenience chat commands
@@ -504,7 +571,7 @@ minetest.register_on_newplayer(function(player)
     teleport_player_to(player, SPAWN_POS)
     player:get_meta():set_string("spawned_in_lisbon", "true")
     minetest.chat_send_player(player:get_player_name(),
-        "Welcome to the World Map in Luanti! You have spawned in Lisbon (Portugal). Type '/worldmap list' to explore.")
+        "Welcome to the World Map in Luanti! You have spawned in Lisbon (Portugal). Type '/worldmap list' or '/goto <lat> <lon>' to explore.")
 end)
 
 -- Handle respawn in Lisbon
@@ -519,7 +586,6 @@ minetest.register_on_joinplayer(function(player)
     local dist_from_zero = math.sqrt(p.x * p.x + p.z * p.z)
     local meta = player:get_meta()
 
-    -- If player is stuck around (0,0) [Atlantic Ocean default spawn], underwater, or never spawned in Lisbon:
     if dist_from_zero < 250 or p.y <= 0 or meta:get_string("spawned_in_lisbon") ~= "true" then
         teleport_player_to(player, SPAWN_POS)
         meta:set_string("spawned_in_lisbon", "true")

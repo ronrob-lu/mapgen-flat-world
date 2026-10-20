@@ -43,16 +43,39 @@ Real geographic biomes come alive with authentic native foliage, trees, and surf
 - 🌾 **Savannas & Grasslands**: Sun-drenched acacia plains in Africa and sweeping steppes in Eurasia.
 - 🏔️ **Alpine Peaks**: Towering mountain ranges including the Himalayas / Mount Everest ($Y = 44$), the Andes, the Alps, and the Rockies.
 
-### ✈️ **In-Game Fast Travel & Spawn in Lisbon (`/worldmap`, `/dover`, `/calais`, `/newyork`)**
-Start exploring in seconds with built-in landmark navigation:
+### ✈️ **In-Game Fast Travel & Spawn in Lisbon (`/worldmap`, `/goto`, `/fly`)**
+Start exploring in seconds with built-in landmark navigation and inspection tools:
 - 🇵🇹 **Default Spawn in Lisbon (Portugal)**: All players spawn safely on land in Lisbon (`X=-1480, Z=6670`). If an existing player was trapped in the Atlantic Ocean at `(0, 0)`, they are automatically rescued and relocated to Lisbon on join!
 - ⚡ **Direct Shortcut Commands**:
   - `/spawn` or `/lisbon` — Teleport to Lisbon (Portugal).
-  - `/dover` — Teleport to Dover (GB) on the White Cliffs of Kent.
-  - `/calais` — Teleport to Calais (France).
-  - `/newyork` — Teleport to New York (USA).
-- 🧭 `/worldmap` — View your current real-world latitude, longitude, elevation, and biome.
+  - `/dover` — Teleport to Dover (GB) on the White Cliffs of Kent (`X=150, Z=8780`).
+  - `/calais` — Teleport to Calais (France) across the English Channel (`X=380, Z=8690`).
+  - `/newyork` — Teleport to New York (USA) (`X=-12630, Z=7030`).
+- 🌐 **Global Coordinate Teleport (`/goto <lat> <lon>`)**:
+  - Teleport to *any* real-world coordinates on Earth! (e.g. `/goto 51.13 1.31` for Dover, `/goto -33.86 151.2` for Sydney, `/goto 48.85 2.35` for Paris).
+- 🚀 **High-Speed World Inspection**:
+  - `/fly` — Instantly grants fly, fast, and noclip privileges. (Press `K` to fly, `J` for fast).
+  - `/flyspeed <multiplier>` — Set flying speed multiplier (e.g. `/flyspeed 10` or `/flyspeed 20`) to zoom across continents in seconds.
+- 🧭 `/worldmap` — View current real-world latitude, longitude, elevation, and biome.
 - 📋 `/worldmap list` — Browse all major destinations (`lisbon`, `dover`, `calais`, `newyork`, `london`, `paris`, `tokyo`, `cairo`, `sydney`, `amazon`, `himalayas`, `sahara`, `southpole`, `north`).
+
+---
+
+## 🔍 How to Test & Inspect the Entire World
+
+Testing a 61,840-block Earth can feel daunting! Here are two easy ways to inspect the whole world:
+
+### Method 1: Instant Top-Down Visual Preview (External)
+Run the built-in world renderer to generate a complete visual map preview image:
+```bash
+python3 preview_world.py
+```
+This produces **`world_preview.png`** (a full $1024 \times 1024$ rendering of the entire Luanti quadratic coordinate space). Open it in your image viewer to inspect coastlines, mountain ranges, Dover/Calais separation, biomes, and polar caps at a glance!
+
+### Method 2: High-Speed Flight & Global Teleport (In-Game)
+1. In-game, run `/fly` to enable fly and noclip privileges.
+2. Run `/flyspeed 10` (or `/flyspeed 20`) to fly across entire continents at super-speed.
+3. Use `/goto <lat> <lon>` or `/worldmap <city>` to jump anywhere on the globe.
 
 ---
 

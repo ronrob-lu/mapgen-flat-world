@@ -87,15 +87,15 @@ h_lisbon, b_lisbon = q(-1480, 6670)
 assert h_lisbon > 0, f'Lisbon must be on land, got height {h_lisbon}'
 
 # Check Dover: on land
-h_dover, b_dover = q(190, 8770)
+h_dover, b_dover = q(150, 8780)
 assert h_dover > 0, f'Dover must be on land, got height {h_dover}'
 
 # Check Calais: on land
-h_calais, b_calais = q(360, 8710)
+h_calais, b_calais = q(380, 8690)
 assert h_calais > 0, f'Calais must be on land, got height {h_calais}'
 
 # Check New York: on land
-h_ny, b_ny = q(-12650, 7020)
+h_ny, b_ny = q(-12630, 7030)
 assert h_ny > 0, f'New York must be on land, got height {h_ny}'
 
 # Check Sahara: desert
